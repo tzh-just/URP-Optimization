@@ -471,30 +471,14 @@ half MipGaussianBlendWeight(int level)
 
 half4 BlurFit(Varyings input) : SV_Target
 {
-    half3 color=_BaseMap.SampleLevel(sampler_BaseMap, input.uv, 6).rgb;;
+    half ao=_BaseMap.SampleLevel(sampler_BaseMap, input.uv, 6).r;
     for(int i=5;i>=0;i--)
     {
-        half3 src = _BaseMap.SampleLevel(sampler_BaseMap, input.uv, i).rgb;
+        half tmp = _BaseMap.SampleLevel(sampler_BaseMap, input.uv, i).r;
         half weight = MipGaussianBlendWeight(i);
-        color = half4((1 - weight) * color + weight * src, 1.0f);
+        ao = (1 - weight) * ao + weight * tmp;
     }
-    return half4(color,1);
+    return 1-ao;
 }
-
-/*static half weight[3]={
-    0.00211072,
-    0.0302938,
-    0.343295
-};
-half4 BlurFit(Varyings input) : SV_Target
-{
-    half3 color=_BaseMap.SampleLevel(sampler_BaseMap, input.uv, 3).rgb;
-    for(int i=2;i>=0;i--)
-    {
-        half3 src = _BaseMap.SampleLevel(sampler_BaseMap, input.uv, i).rgb;
-        color = half4((1 - weight[i]) * color + weight[i] * src, 1.0f);
-    }
-    return half4(color,1);
-}*/
 
 #endif //UNIVERSAL_SSAO_INCLUDED
