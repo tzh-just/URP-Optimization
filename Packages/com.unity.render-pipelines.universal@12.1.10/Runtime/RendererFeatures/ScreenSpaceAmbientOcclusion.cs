@@ -1,7 +1,4 @@
 using System;
-#if UNITY_EDITOR
-using ShaderKeywordFilter = UnityEditor.ShaderKeywordFilter;
-#endif
 
 namespace UnityEngine.Rendering.Universal
 {
@@ -10,10 +7,6 @@ namespace UnityEngine.Rendering.Universal
     {
         // Parameters
         [SerializeField] internal bool Downsample = false;
-#if UNITY_EDITOR
-        // AfterOpaque requires also the "off variant" to be included
-        [ShaderKeywordFilter.SelectIf(true, overridePriority: true, keywordNames: new string[] {"", ShaderKeywordStrings.ScreenSpaceOcclusion})]
-#endif
         [SerializeField] internal bool AfterOpaque = false;
         [SerializeField] internal DepthSource Source = DepthSource.DepthNormals;
         [SerializeField] internal NormalQuality NormalSamples = NormalQuality.Medium;
@@ -21,6 +14,9 @@ namespace UnityEngine.Rendering.Universal
         [SerializeField] internal float DirectLightingStrength = 0.25f;
         [SerializeField] internal float Radius = 0.035f;
         [SerializeField] internal int SampleCount = 4;
+        
+        [SerializeField] internal bool MipGaussian = false;
+        [SerializeField] internal DownSampleMultiple DownsampleMultiple = DownSampleMultiple.Half;
         // Enums
         internal enum DepthSource
         {
@@ -34,17 +30,18 @@ namespace UnityEngine.Rendering.Universal
             Medium,
             High
         }
+        
+        internal enum DownSampleMultiple
+        {
+            Half = 2,
+            Quarter = 4
+        }
     }
 
     [DisallowMultipleRendererFeature]
     [Tooltip("The Ambient Occlusion effect darkens creases, holes, intersections and surfaces that are close to each other.")]
     internal class ScreenSpaceAmbientOcclusion : ScriptableRendererFeature
     {
-#if UNITY_EDITOR
-        [ShaderKeywordFilter.SelectIf(true, overridePriority: true, keywordNames: ShaderKeywordStrings.ScreenSpaceOcclusion)]
-        private const bool k_RequiresScreenSpaceOcclusion = true;
-#endif
-
         // Serialized Fields
         [SerializeField, HideInInspector] private Shader m_Shader = null;
         [SerializeField] private ScreenSpaceAmbientOcclusionSettings m_Settings = new ScreenSpaceAmbientOcclusionSettings();
@@ -138,10 +135,9 @@ namespace UnityEngine.Rendering.Universal
             private ProfilingSampler m_ProfilingSampler = ProfilingSampler.Get(URPProfileId.SSAO);
             private ScriptableRenderer m_Renderer = null;
             private RenderTargetIdentifier m_SSAOTexture1Target = new RenderTargetIdentifier(s_SSAOTexture1ID, 0, CubemapFace.Unknown, -1);
+            private RenderTargetIdentifier m_SSAOTexture2Target = new RenderTargetIdentifier(s_SSAOTexture2ID, 0, CubemapFace.Unknown, -1);
+            private RenderTargetIdentifier m_SSAOTexture3Target = new RenderTargetIdentifier(s_SSAOTexture3ID, 0, CubemapFace.Unknown, -1);
             private RenderTargetIdentifier m_SSAOTextureFinalTarget = new RenderTargetIdentifier(s_SSAOTextureFinalID, 0, CubemapFace.Unknown, -1);
-            //====================================================================================================
-            private RenderTargetIdentifier m_SSAOTexture2Target = new RenderTargetIdentifier(s_SSAOTexture2ID, 0 ,CubemapFace.Unknown, -1);
-            //====================================================================================================
             private RenderTextureDescriptor m_AOPassDescriptor;
             private RenderTextureDescriptor m_BlurPassesDescriptor;
             private RenderTextureDescriptor m_FinalDescriptor;
@@ -156,6 +152,7 @@ namespace UnityEngine.Rendering.Universal
             private static readonly int s_SSAOParamsID = Shader.PropertyToID("_SSAOParams");
             private static readonly int s_SSAOTexture1ID = Shader.PropertyToID("_SSAO_OcclusionTexture1");
             private static readonly int s_SSAOTexture2ID = Shader.PropertyToID("_SSAO_OcclusionTexture2");
+            private static readonly int s_SSAOTexture3ID = Shader.PropertyToID("_SSAO_OcclusionTexture3");
             private static readonly int s_SSAOTextureFinalID = Shader.PropertyToID("_SSAO_OcclusionTexture");
             private static readonly int s_CameraViewXExtentID = Shader.PropertyToID("_CameraViewXExtent");
             private static readonly int s_CameraViewYExtentID = Shader.PropertyToID("_CameraViewYExtent");
@@ -171,11 +168,8 @@ namespace UnityEngine.Rendering.Universal
                 BlurVertical = 2,
                 BlurFinal = 3,
                 AfterOpaque = 4,
-                //增加pass枚举
-                //====================================================================================================
                 BlurFit = 5,
-                //====================================================================================================
-            }
+			}
 
             internal ScreenSpaceAmbientOcclusionPass()
             {
@@ -225,7 +219,7 @@ namespace UnityEngine.Rendering.Universal
             public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
             {
                 RenderTextureDescriptor cameraTargetDescriptor = renderingData.cameraData.cameraTargetDescriptor;
-                int downsampleDivider = m_CurrentSettings.Downsample ? 2 : 1;
+                int downsampleDivider = m_CurrentSettings.Downsample ? (int)m_CurrentSettings.DownsampleMultiple : 1;
 
                 // Update SSAO parameters in the material
                 Vector4 ssaoParams = new Vector4(
@@ -322,8 +316,15 @@ namespace UnityEngine.Rendering.Universal
                 m_AOPassDescriptor.width /= downsampleDivider;
                 m_AOPassDescriptor.height /= downsampleDivider;
                 m_AOPassDescriptor.colorFormat = RenderTextureFormat.ARGB32;
-                m_AOPassDescriptor.useMipMap = true;
                 
+                if (m_CurrentSettings.MipGaussian)
+                {
+                    m_AOPassDescriptor.colorFormat = RenderTextureFormat.R8;
+                    m_AOPassDescriptor.autoGenerateMips = true;
+                    m_AOPassDescriptor.useMipMap = true;
+                }
+
+               
                 m_BlurPassesDescriptor = descriptor;
                 m_BlurPassesDescriptor.width /= downsampleDivider;
                 m_BlurPassesDescriptor.height /= downsampleDivider;
@@ -332,15 +333,25 @@ namespace UnityEngine.Rendering.Universal
                 m_FinalDescriptor = descriptor;
                 m_FinalDescriptor.width /= downsampleDivider;
                 m_FinalDescriptor.height /= downsampleDivider;
+                
                 m_FinalDescriptor.colorFormat = m_SupportsR8RenderTextureFormat ? RenderTextureFormat.R8 : RenderTextureFormat.ARGB32;
-
+                
+                if (m_CurrentSettings.MipGaussian)
+                {
+                    m_FinalDescriptor.colorFormat = RenderTextureFormat.R8;
+                }
+                
                 // Get temporary render textures
                 cmd.GetTemporaryRT(s_SSAOTexture1ID, m_AOPassDescriptor, FilterMode.Bilinear);
-                cmd.GetTemporaryRT(s_SSAOTexture2ID, m_BlurPassesDescriptor, FilterMode.Bilinear);
+                if (!m_CurrentSettings.MipGaussian)
+                {
+                    cmd.GetTemporaryRT(s_SSAOTexture2ID, m_BlurPassesDescriptor, FilterMode.Bilinear);
+                    cmd.GetTemporaryRT(s_SSAOTexture3ID, m_BlurPassesDescriptor, FilterMode.Bilinear);
+                }
                 cmd.GetTemporaryRT(s_SSAOTextureFinalID, m_FinalDescriptor, FilterMode.Bilinear);
+
+                // Configure targets and clear color
                 ConfigureTarget(m_CurrentSettings.AfterOpaque ? m_Renderer.cameraColorTarget : s_SSAOTexture2ID);
-                
-                
                 ConfigureClear(ClearFlag.None, Color.white);
             }
 
@@ -369,10 +380,19 @@ namespace UnityEngine.Rendering.Universal
                     Render(cmd, m_SSAOTexture1Target, ShaderPasses.AO);
 
                     // Execute the Blur Passes
-                    RenderAndSetBaseMap(cmd, m_SSAOTexture1Target, m_SSAOTexture2Target, ShaderPasses.BlurFit);
-                    PostProcessUtils.SetSourceSize(cmd, m_BlurPassesDescriptor);
-                    RenderAndSetBaseMap(cmd, m_SSAOTexture2Target, m_SSAOTextureFinalTarget, ShaderPasses.BlurFinal);
+                    if (m_CurrentSettings.MipGaussian)
+                    {
+                        RenderAndSetBaseMap(cmd, m_SSAOTexture1Target, m_SSAOTextureFinalTarget, ShaderPasses.BlurFit);
+                    }
+                    else
+                    {
+                        RenderAndSetBaseMap(cmd, m_SSAOTexture1Target, m_SSAOTexture2Target, ShaderPasses.BlurHorizontal);
 
+                        PostProcessUtils.SetSourceSize(cmd, m_BlurPassesDescriptor);
+                        RenderAndSetBaseMap(cmd, m_SSAOTexture2Target, m_SSAOTexture3Target, ShaderPasses.BlurVertical);
+                        RenderAndSetBaseMap(cmd, m_SSAOTexture3Target, m_SSAOTextureFinalTarget, ShaderPasses.BlurFinal);
+                    }
+                    
                     // Set the global SSAO texture and AO Params
                     cmd.SetGlobalTexture(k_SSAOTextureName, m_SSAOTextureFinalTarget);
                     cmd.SetGlobalVector(k_SSAOAmbientOcclusionParamName, new Vector4(0f, 0f, 0f, m_CurrentSettings.DirectLightingStrength));
@@ -437,7 +457,11 @@ namespace UnityEngine.Rendering.Universal
                 }
 
                 cmd.ReleaseTemporaryRT(s_SSAOTexture1ID);
-                cmd.ReleaseTemporaryRT(s_SSAOTexture2ID);
+                if (!m_CurrentSettings.MipGaussian)
+                {
+                    cmd.ReleaseTemporaryRT(s_SSAOTexture2ID);
+                    cmd.ReleaseTemporaryRT(s_SSAOTexture3ID);
+                }
                 cmd.ReleaseTemporaryRT(s_SSAOTextureFinalID);
             }
         }

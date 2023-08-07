@@ -16,6 +16,9 @@ namespace UnityEditor.Rendering.Universal
         private SerializedProperty m_DirectLightingStrength;
         private SerializedProperty m_Radius;
         private SerializedProperty m_SampleCount;
+        
+        private SerializedProperty m_MipGaussian;
+        private SerializedProperty m_DownsampleMultiple;
         #endregion
 
         private bool m_IsInitialized = false;
@@ -24,6 +27,7 @@ namespace UnityEditor.Rendering.Universal
         private struct Styles
         {
             public static GUIContent Downsample = EditorGUIUtility.TrTextContent("Downsample", "With this option enabled, Unity downsamples the SSAO effect texture to improve performance. Each dimension of the texture is reduced by a factor of 2.");
+            
             public static GUIContent AfterOpaque = EditorGUIUtility.TrTextContent("After Opaque", "With this option enabled, Unity calculates and apply SSAO after the opaque pass to improve performance on mobile platforms with tiled-based GPU architectures. This is not physically correct.");
             public static GUIContent Source = EditorGUIUtility.TrTextContent("Source", "The source of the normal vector values.\nDepth Normals: the feature uses the values generated in the Depth Normal prepass.\nDepth: the feature reconstructs the normal values using the depth buffer.\nIn the Deferred rendering path, the feature uses the G-buffer normals texture.");
             public static GUIContent NormalQuality = new GUIContent("Normal Quality", "The number of depth texture samples that Unity takes when computing the normals. Low:1 sample, Medium: 5 samples, High: 9 samples.");
@@ -31,6 +35,9 @@ namespace UnityEditor.Rendering.Universal
             public static GUIContent DirectLightingStrength = EditorGUIUtility.TrTextContent("Direct Lighting Strength", "Controls how much the ambient occlusion affects direct lighting.");
             public static GUIContent Radius = EditorGUIUtility.TrTextContent("Radius", "The radius around a given point, where Unity calculates and applies the effect.");
             public static GUIContent SampleCount = EditorGUIUtility.TrTextContent("Sample Count", "The number of samples that Unity takes when calculating the obscurance value. Higher values have high performance impact.");
+            
+            public static GUIContent MipGaussian = EditorGUIUtility.TrTextContent("Mip Gaussian", "Gaussian Blur by Mipmap");
+            public static GUIContent DownsampleMultiple = EditorGUIUtility.TrTextContent("Downsample Multiple", "Intermediate render textures will apply the mutiple of downsample");
         }
 
         private void Init()
@@ -45,6 +52,9 @@ namespace UnityEditor.Rendering.Universal
             m_Radius = settings.FindPropertyRelative("Radius");
             m_SampleCount = settings.FindPropertyRelative("SampleCount");
             m_IsInitialized = true;
+            
+            m_MipGaussian = settings.FindPropertyRelative("MipGaussian");
+            m_DownsampleMultiple = settings.FindPropertyRelative("DownsampleMultiple");
         }
 
         public override void OnInspectorGUI()
@@ -57,7 +67,9 @@ namespace UnityEditor.Rendering.Universal
             bool isDeferredRenderingMode = RendererIsDeferred();
 
             EditorGUILayout.PropertyField(m_Downsample, Styles.Downsample);
-
+            
+            EditorGUILayout.PropertyField(m_DownsampleMultiple, Styles.DownsampleMultiple);
+            
             EditorGUILayout.PropertyField(m_AfterOpaque, Styles.AfterOpaque);
 
             GUI.enabled = !isDeferredRenderingMode;
@@ -77,6 +89,10 @@ namespace UnityEditor.Rendering.Universal
 
             m_Intensity.floatValue = Mathf.Clamp(m_Intensity.floatValue, 0f, m_Intensity.floatValue);
             m_Radius.floatValue = Mathf.Clamp(m_Radius.floatValue, 0f, m_Radius.floatValue);
+
+            EditorGUILayout.PropertyField(m_MipGaussian, Styles.MipGaussian);
+            
+
         }
 
         private bool RendererIsDeferred()
